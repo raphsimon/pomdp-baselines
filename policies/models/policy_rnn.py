@@ -56,8 +56,13 @@ class ModelFreeOffPolicy_Separate_RNN(nn.Module):
         self.gamma = gamma
         self.tau = tau
 
-        self.algo = RL_ALGORITHMS[algo_name](**kwargs[algo_name], action_dim=action_dim)
-
+        if kwargs:
+            self.algo = RL_ALGORITHMS[algo_name](**kwargs[algo_name], action_dim=action_dim)
+        else:
+            # If we already passed all the arguments to __init__, there 
+            # is nothing more to unpack from kwargs
+            self.algo = RL_ALGORITHMS[algo_name](action_dim=action_dim)
+        
         # Critics
         self.critic = Critic_RNN(
             obs_dim,
