@@ -1,0 +1,50 @@
+seed: 73
+cuda: -1 # use_gpu
+# RAM: ~10G
+env:
+  env_type: nasim
+  env_name: TinyPO-v0
+  num_eval_tasks: 5
+
+train:
+  # 250*1000 = 250.000 total steps max.
+  # 1000 is the env step limit.
+  num_iters: 100 # number meta-training iterates
+  num_init_rollouts_pool: 5 # before training
+  num_rollouts_per_iter: 1
+  num_updates_per_iter: 0.1
+
+  # buffer params
+  buffer_size: 1e5
+  batch_size: 32 # to tune based on sampled_seq_len
+  sampled_seq_len: -1 # -1 is all, or positive integer
+  sample_weight_baseline: 0.0
+
+eval:
+  eval_stochastic: false # also eval stochastic policy
+  log_interval: 2 # Number of iterations
+  save_interval: -1
+  log_tensorboard: false # Turn off if no CUDA drivers available.
+
+policy:
+  separate: True
+  seq_model: gru # [lstm, gru]
+  algo_name: sacd # only support sac-discrete
+
+  action_embedding_size: 8 # no action input
+  observ_embedding_size: 32
+  reward_embedding_size: 8
+  rnn_hidden_size: 64
+
+  dqn_layers: [64, 64]
+  policy_layers: [64, 64]
+  lr: 0.0003
+  gamma: 0.95
+  tau: 0.005
+
+  sacd:
+    entropy_alpha: null
+    automatic_entropy_tuning: true # Overwrites target_entropy if true
+    target_entropy: 0.9 # the ratio: target_entropy = ratio * log(|A|)
+    alpha_lr: 0.0003
+
