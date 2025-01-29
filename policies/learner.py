@@ -59,6 +59,7 @@ class Learner:
             "rmdp",
             "generalize",
             "atari",
+            "nasim"
         ]
         self.env_type = env_type
 
@@ -192,6 +193,40 @@ class Learner:
             self.max_rollouts_per_task = 1
             self.max_trajectory_len = self.train_env._max_episode_steps
 
+        elif self.env_type == "nasim":
+            import nasim
+            from nasim.envs.wrappers import StochasticEpisodeStarts
+            import gymnasium
+            from gymnasium.wrappers import StepAPICompatibility
+
+            # Make gymnasium environment compatible with code written for
+            # gym environments.
+            env = gymnasium.make(env_name)
+            stochastic_env = StochasticEpisodeStarts(env)
+            self.train_env = StepAPICompatibility(stochastic_env, 
+                                                  output_truncation_bool=False)
+            
+            # TODO apply wrapper to only return observation, not info.
+
+            # NASim does not have a seed method. So we comment this code out
+            #self.train_env.seed(self.seed)
+            #self.train_env.action_space.np_random.seed(self.seed)  # crucial
+
+            # Don't use the same stochastic wrapper, we want the test env to be different
+            # from the training environment.
+            self.eval_env = StepAPICompatibility(gymnasium.make(env_name), 
+                                                 output_truncation_bool=False)
+            #self.eval_env.seed(self.seed + 1)
+            
+            # Reset envs here because we got some error before for not resetting them
+            self.eval_env.reset()
+            self.train_env.reset()
+
+            self.train_tasks = []
+            self.eval_tasks = num_eval_tasks * [None]
+
+            self.max_rollouts_per_task = 1
+            self.max_trajectory_len = self.train_env.unwrapped.scenario.step_limit
         else:
             raise ValueError
 
@@ -201,7 +236,10 @@ class Learner:
             self.act_dim = self.train_env.action_space.shape[0]
             self.act_continuous = True
         else:
-            assert self.train_env.action_space.__class__.__name__ == "Discrete"
+            # NASim uses a FlatActionSpace. Which is just a Discrete action space,
+            # but since it is a gymnasium object, we can't use isinstance to compare
+            # and have to hard code it.
+            assert self.train_env.action_space.__class__.__name__ in ("Discrete", "FlatActionSpace")
             self.act_dim = self.train_env.action_space.n
             self.act_continuous = False
         self.obs_dim = self.train_env.observation_space.shape[0]  # include 1-dim done
@@ -642,6 +680,7 @@ class Learner:
                     # set: obs <- next_obs
                     obs = next_obs.clone()
 
+                    # TODO what is going on here? Do we need to care about it?
                     if (
                         self.env_type == "meta"
                         and "is_goal_state" in dir(self.eval_env.unwrapped)
@@ -847,11 +886,14 @@ class Learner:
             logger.record_tabular(
                 "metrics/total_steps_eval_worst", total_steps_eval_worst.mean()
             )
-
-        elif self.env_type in ["pomdp", "credit", "atari"]:
+        # Don't know if this is the right place to put NASim
+        # Looks like the most straight-forward approach
+        elif self.env_type in ["pomdp", "credit", "atari", "nasim"]:
+            # Perform deterministic evaluation
             returns_eval, success_rate_eval, _, total_steps_eval = self.evaluate(
                 self.eval_tasks
             )
+            # Perform stochastic evaluation, if set in the config.
             if self.eval_stochastic:
                 (
                     returns_eval_sto,
