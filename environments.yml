@@ -39,6 +39,7 @@ dependencies:
 - gstreamer=1.14.0
 - gxx_impl_linux-64=7.3.0
 - gxx_linux-64=7.3.0
+- gym=0.21.0
 - icu=58.2
 - idna=2.10
 - importlib_metadata=2.0.0
@@ -212,7 +213,6 @@ dependencies:
   - google-auth-oauthlib==0.4.2
   - google-pasta==0.2.0
   - grpcio==1.32.0
-  - gym==0.21.0
   - h5py==2.10.0
   - huggingface-hub==0.0.8
   - imageio==2.9.0
