@@ -199,14 +199,30 @@ class Learner:
             import gymnasium
             from gymnasium.wrappers import StepAPICompatibility
 
+            class ResetCompatibilityWrapper(gym.ObservationWrapper):
+                """
+                A wrapper to make Gymnasium environments compatible with code 
+                expecting the old Gym API.
+                Only returns the observation from reset(), dropping additional info.
+                """
+                def __init__(self, env: gym.Env):
+                    super().__init__(env)
+
+                def step(self, action):
+                    obs, r, done, info = self.env.step(action)
+                    return obs, r, done, {}
+
+                def reset(self, **kwrags):
+                    obs, _ = self.env.reset(**kwargs)  # Discard info
+                    return obs
+
             # Make gymnasium environment compatible with code written for
             # gym environments.
             env = gymnasium.make(env_name)
             stochastic_env = StochasticEpisodeStarts(env)
             self.train_env = StepAPICompatibility(stochastic_env, 
                                                   output_truncation_bool=False)
-            
-            # TODO apply wrapper to only return observation, not info.
+            self.train_env = ResetCompatibilityWrapper(self.train_env)
 
             # NASim does not have a seed method. So we comment this code out
             #self.train_env.seed(self.seed)
@@ -216,6 +232,7 @@ class Learner:
             # from the training environment.
             self.eval_env = StepAPICompatibility(gymnasium.make(env_name), 
                                                  output_truncation_bool=False)
+            self.eval_env = ResetCompatibilityWrapper(self.eval_env)
             #self.eval_env.seed(self.seed + 1)
             
             # Reset envs here because we got some error before for not resetting them
@@ -624,7 +641,7 @@ class Learner:
             ]  # original size
             observations = np.zeros((len(tasks), self.max_trajectory_len + 1, obs_size))
         else:  # pomdp, rmdp, generalize
-            num_steps_per_episode = self.eval_env._max_episode_steps
+            num_steps_per_episode = self.eval_env._max_episode_steps if self.env_type != "nasim" else self.eval_env.unwrapped.scenario.step_limit
             observations = None
 
         for task_idx, task in enumerate(tasks):
