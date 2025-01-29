@@ -1,5 +1,5 @@
 # -*- coding: future_fstrings -*-
-import gc, sys, os, time
+import sys, os, time
 
 t0 = time.time()
 import numpy as np
@@ -17,7 +17,6 @@ import optuna
 from optuna.storages import RetryFailedTrialCallback
 from optuna.trial import TrialState
 from optuna.study import MaxTrialsCallback
-from optuna.pruners import MedianPruner
 from sqlalchemy.pool import NullPool
 
 """
@@ -32,27 +31,6 @@ and also used to prune other trials.
 """
 
 DATABASE_URL = os.environ.get("OPTUNA_DB_URL", "sqlite:////home/rsimon/optuna_hpo.db")
-
-def print_gpu_memory():
-    print(f"Allocated: {torch.cuda.memory_allocated() / 1024**3:.2f}GB")
-    print(f"Cached: {torch.cuda.memory_reserved() / 1024**3:.2f}GB")
-
-def clear_cuda_memory():
-    # Delete all global variables that are PyTorch tensors or models
-    for obj in list(globals()):
-        if isinstance(globals()[obj], (torch.Tensor, torch.nn.Module)):
-            del globals()[obj]
-    
-    # Empty the cache
-    torch.cuda.empty_cache()
-    # Force garbage collection
-    gc.collect()
-    # Ensure CUDA synchronization
-    torch.cuda.synchronize()
-    
-    # Print memory stats to verify
-    print_gpu_memory()
-    #print(torch.cuda.memory_summary())
 
 def optimize_hyperparameters(study_name, optimize_trial, n_trials=100, max_total_trials=None, n_jobs=1):
     # Add stream handler of stdout to show the messages
@@ -81,7 +59,6 @@ def optimize_hyperparameters(study_name, optimize_trial, n_trials=100, max_total
         storage=storage,
         load_if_exists=True,
         direction='maximize',
-        pruner=MedianPruner(n_startup_trials=10, n_min_trials=10)
     ) # No sampler is specified, so a default sampler (TPE) is used.
     
     if max_total_trials is not None:
@@ -94,9 +71,6 @@ def optimize_hyperparameters(study_name, optimize_trial, n_trials=100, max_total
         ]
         completed_trials = len(study.get_trials(states=counted_states))
         if completed_trials < max_total_trials:
-            # Overrides `prefer="threads"` to use multi-processing.
-            # Ref: https://github.com/optuna/optuna/issues/2202
-            #with parallel_backend('multiprocessing'):
             return study.optimize(
                     optimize_trial,
                     callbacks=[
@@ -109,8 +83,6 @@ def optimize_hyperparameters(study_name, optimize_trial, n_trials=100, max_total
                     gc_after_trial=True
                 )
     else:
-        # Overrides `prefer="threads"` to use multi-processing.
-        #with parallel_backend('multiprocessing'):
         return study.optimize(optimize_trial, n_trials=n_trials, n_jobs=n_jobs, gc_after_trial=True)
 
 
@@ -123,10 +95,7 @@ def suggest_sacd_params(trial: optuna.Trial):
     """
     gamma = trial.suggest_categorical("gamma", [0.9, 0.95, 0.975, 0.99])                                    # |V| = 4
     learning_rate = trial.suggest_categorical("learning_rate", [3e-05, 0.0001, 0.0003, 0.001, 0.003])       # |V| = 5
-    # Maybe we should decrease the size of the buffer. There are a few publications that
-    # say the bigger the buffer, the better, but in this case we are only running 100k
-    # steps in the environment. Maybe set buffer size to 50k, 100k, 250k, 500k, 1m
-    buffer_size = trial.suggest_categorical("buffer_size", [int(1e4), int(1e5), int(1e6)])      # |V| = 3
+    buffer_size = trial.suggest_categorical("buffer_size", [int(1e4), int(1e5), int(1e6)])                  # |V| = 3
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])                                # |V| = 4
     sampled_seq_len = trial.suggest_categorical("sampled_seq_len", ["all", "batch_size"])                   # |V| = 2
     # This is how I understood things relating to the sampled sequence length
@@ -136,11 +105,12 @@ def suggest_sacd_params(trial: optuna.Trial):
         sampled_seq_len = -1
     else:
         sampled_seq_len = batch_size
-    num_updates_per_iter = trial.suggest_categorical('num_updates_per_iter', [0.004, 0.01, 0.02, 0.1, 1.0])               # |V| = 3
+    # The smaller num_updates_per_iter, the less often the policy is updated
+    # Basically, for num_updates_per_iter = 0.004, the policy is updated every
+    # 250 iterations.
     tau = trial.suggest_categorical("tau", [0.001, 0.005, 0.01, 0.02, 0.05])                                # |V| = 5
     observ_embedding_size = trial.suggest_categorical("observ_embedding_size", [8, 16, 32, 64])             # |V| = 4
     action_embedding_size = trial.suggest_categorical("action_embedding_size", [8, 16, 32, 64])             # |V| = 4
-    seq_model = trial.suggest_categorical("seq_model", ["lstm", "gru"])                                     # |V| = 2
     entropy_target = trial.suggest_categorical("entropy_target", [0.9, 0.95, 0.975, 0.99])                  # |V| = 4
 
     hyperparams = {
@@ -150,14 +120,13 @@ def suggest_sacd_params(trial: optuna.Trial):
         "batch_size": batch_size,
         "tau": tau,
         "sampled_seq_len": sampled_seq_len,
-        "num_updates_per_iter": num_updates_per_iter,
         "observ_embedding_size": observ_embedding_size,
         "action_embedding_size": action_embedding_size,
         "seq_model": seq_model,
         "entropy_target": entropy_target
     }
-    
     return hyperparams
+
 
 def setup_logging(exp_id, pid, logger_formats, yaml_conf):
     os.makedirs(exp_id, exist_ok=True)
@@ -236,48 +205,24 @@ if __name__ == '__main__':
         v["env"]["oracle"] = True
 
     env_name = v["env"]["env_name"]
+    study_name = v["stdy_name"]
 
-    study_name = f"{algo}_{env_name}_smaller_rpb_batches"
-
-    def hyperparams_search(n_trials=50, max_total_trials=None, n_jobs=1, pt_threads=1):
-        # System resources
-        #total_ram = 128  # GB
-        #instance_ram = 8  # GB
-        #safety_factor = 0.9
-        #max_parallel = np.floor((total_ram * safety_factor) / instance_ram)
-        #
-        #assert n_jobs * pt_threads < max_parallel, "Too many resources demanded for " \
-        #    "system configuration. Either use less jobs, or reduce the number of " \
-        #    "threads pytoch is allowed to use."
-        #
-        # Commented above block because we're not running on parallel anymore
+    def hyperparams_search(n_trials=50, max_total_trials=None, n_jobs=1):
 
         # system: device, threads, seed, pid
         seed = np.random.randint(0, 1e9)
         system.reproduce(seed)
         v["seed"] = seed
 
-        logger.log(f"Setting number of PyTorch threads to; {pt_threads}")
-        torch.set_num_threads(pt_threads)
-        #torch.set_num_interop_threads(pt_threads)
         np.set_printoptions(precision=3, suppress=True)
         torch.set_printoptions(precision=3, sci_mode=False)
 
-        # set gpu
-        print('GPU Memory before setting GPU')
-        print_gpu_memory()
         set_gpu_mode(torch.cuda.is_available() and v["cuda"] >= 0, v["cuda"])
-        torch.cuda.empty_cache()
-        print('GPU Memory after clearing cache')
-        print_gpu_memory()
-        #print(torch.cuda.memory_summary())
 
         print(f"{torch.get_num_threads()=}")
         print(f"{torch.get_num_interop_threads()=}")
 
         def optimize_trial(trial):
-            # Clear the memory and all allocations before starting a new trial.
-            clear_cuda_memory()
             # Here we need to sample hyperparams and run the training
             sampled_hyperparams = suggest_sacd_params(trial)
 
@@ -296,12 +241,11 @@ if __name__ == '__main__':
 
             # logs
             if FLAGS.debug:
-                exp_id = "debug/hpo_smaller_rpb_batches/"
+                exp_id = "debug/hpo/"
                 logger_formats = ["stdout", "log", "csv"]
             else:
-                exp_id = "logs/hpo_smaller_rpb_batches/"
-                logger_formats = ["stdout", "log", "csv"] # We removed stdout from log formats.
-
+                exp_id = "logs/hpo/"
+                logger_formats = ["stdout", "log", "csv"]
 
             # Setup the experiment name and logging according to the sampled
             # hyperparameters
@@ -332,9 +276,6 @@ if __name__ == '__main__':
             pid = str(os.getpid())
             setup_logging(exp_id, pid, logger_formats, v)
 
-            print("GPU Memory before creating Learner()")
-            print_gpu_memory()
-
             # start training
             learner = Learner(
                 env_args=v["env"],
@@ -343,20 +284,10 @@ if __name__ == '__main__':
                 policy_args=v["policy"],
                 seed=seed,
             )
-
             logger.log(
                 f"total RAM usage: {psutil.Process().memory_info().rss / 1024 ** 3 :.2f} GB\n"
             )
-            print("GPU Memory after creating Learner")
-            print_gpu_memory()
-
-
             score = learner.train(trial)
-
-            # We could also take the trained agent here and then evaluate it afterwards...
-            # But this would mean that we can't use pruning.
-
-            torch.cuda.empty_cache()
 
             return score
 
