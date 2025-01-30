@@ -32,7 +32,7 @@ and also used to prune other trials.
 
 DATABASE_URL = os.environ.get("OPTUNA_DB_URL", "sqlite:////home/rsimon/optuna_hpo.db")
 
-def optimize_hyperparameters(study_name, optimize_trial, n_trials=100, max_total_trials=None, n_jobs=1):
+def optimize_hyperparameters(study_name, optimize_trial, n_trials=20, max_total_trials=None, n_jobs=1):
     # Add stream handler of stdout to show the messages
     #optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
 
@@ -59,6 +59,7 @@ def optimize_hyperparameters(study_name, optimize_trial, n_trials=100, max_total
         storage=storage,
         load_if_exists=True,
         direction='maximize',
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=400)
     ) # No sampler is specified, so a default sampler (TPE) is used.
     
     if max_total_trials is not None:
@@ -163,7 +164,7 @@ if __name__ == '__main__':
         "whether observe the privileged information of POMDP, reduced to MDP",
     )
     flags.DEFINE_boolean("debug", False, "debug mode")
-    flags.DEFINE_integer("trials", 1, "Number of trials to run")
+    flags.DEFINE_integer("trials", 20, "Number of trials to run")
     flags.DEFINE_integer("n_jobs", 1, "Number of jobs to run in parallel")
     flags.DEFINE_integer("pt_threads", 1, "Number of threads PyTorch is allowed to use")
     flags.DEFINE_integer("max_total_trials", None, "Maxumim number of trials for the study")
@@ -205,7 +206,7 @@ if __name__ == '__main__':
         v["env"]["oracle"] = True
 
     env_name = v["env"]["env_name"]
-    study_name = v["stdy_name"]
+    study_name = v["study_name"]
 
     def hyperparams_search(n_trials=50, max_total_trials=None, n_jobs=1):
 
