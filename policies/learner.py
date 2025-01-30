@@ -25,6 +25,8 @@ from torchkit import pytorch_utils as ptu
 from utils import evaluation as utl_eval
 from utils import logger
 
+import optuna
+
 
 class Learner:
     def __init__(self, env_args, train_args, eval_args, policy_args, seed, **kwargs):
@@ -397,7 +399,7 @@ class Learner:
         self._start_time = time.time()
         self._start_time_last = time.time()
 
-    def train(self):
+    def train(self, trial):
         """
         training loop
         """
@@ -458,7 +460,17 @@ class Learner:
                 ):
                     # save models in later training stage
                     self.save_model(current_num_iters, perf)
+
+                # Report intermediate objective value.
+                trial.report(perf, step=current_num_iters)
+
+                # Handle pruning based on the intermediate value.
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+                
         self.save_model(current_num_iters, perf)
+        # Return the model's final performance
+        return perf
 
     @torch.no_grad()
     def collect_rollouts(self, num_rollouts, random_actions=False):
@@ -957,6 +969,8 @@ class Learner:
             return sum([v.mean() for v in success_rate_eval.values()]) / len(
                 success_rate_eval
             )
+        elif self.eval_stochastic:
+            return np.mean(np.sum(returns_eval_sto, axis=-1))
         else:
             return np.mean(np.sum(returns_eval, axis=-1))
 
