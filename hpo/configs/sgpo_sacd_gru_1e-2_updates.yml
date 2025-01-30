@@ -27,7 +27,7 @@ train:
 
 eval:
   eval_stochastic: true # also eval stochastic policy
-  log_interval: 20 # Number of iterations between logging. I set it to 1/10 of num_iters here
+  log_interval: 200 # Number of iterations between logging. I set it to 1/10 of num_iters here
   save_interval: -1
   log_tensorboard: false
 
