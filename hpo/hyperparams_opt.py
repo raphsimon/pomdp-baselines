@@ -192,8 +192,10 @@ if __name__ == '__main__':
         v["train"]["num_init_rollouts_pool"] = FLAGS.num_init_rollouts
     
     if FLAGS.output is not None:
+        # Use it as prefix for the output path
         output_base = FLAGS.output
     else:
+        # We just leave it blank and let the code do what it always did.
         output_base = ''
 
     seq_model, algo = v["policy"]["seq_model"], v["policy"]["algo_name"]
