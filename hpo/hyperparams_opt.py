@@ -74,6 +74,7 @@ def optimize_hyperparameters(study_name, optimize_trial, n_trials=20, max_total_
         if completed_trials < max_total_trials:
             return study.optimize(
                     optimize_trial,
+                    n_trials=n_trials,
                     callbacks=[
                         MaxTrialsCallback(
                             max_total_trials,
@@ -166,7 +167,6 @@ if __name__ == '__main__':
     flags.DEFINE_boolean("debug", False, "debug mode")
     flags.DEFINE_integer("trials", 20, "Number of trials to run")
     flags.DEFINE_integer("n_jobs", 1, "Number of jobs to run in parallel")
-    flags.DEFINE_integer("pt_threads", 1, "Number of threads PyTorch is allowed to use")
     flags.DEFINE_integer("max_total_trials", None, "Maxumim number of trials for the study")
     flags.DEFINE_integer("n_evals", 10, "Number of evaluations to perform during trial")
     flags.DEFINE_integer("num_iters", None, "Number of iterations to perform in the environment during one trial")
@@ -231,7 +231,6 @@ if __name__ == '__main__':
             v["train"]["buffer_size"] = sampled_hyperparams["buffer_size"]
             v["train"]["batch_size"] = sampled_hyperparams["batch_size"]
             v["train"]["sampled_seq_len"] = sampled_hyperparams["sampled_seq_len"]
-            v["train"]["num_updates_per_iter"] = sampled_hyperparams["num_updates_per_iter"]
             v["policy"]["seq_model"] = sampled_hyperparams["seq_model"]
             v["policy"]["observ_embedding_size"] = sampled_hyperparams["observ_embedding_size"]
             v["policy"]["action_embedding_size"] = sampled_hyperparams["action_embedding_size"]
@@ -294,4 +293,4 @@ if __name__ == '__main__':
 
         optimize_hyperparameters(study_name, optimize_trial, n_trials, max_total_trials, n_jobs)
 
-    hyperparams_search(FLAGS.trials, FLAGS.max_total_trials, FLAGS.n_jobs, FLAGS.pt_threads)
+    hyperparams_search(FLAGS.trials, FLAGS.max_total_trials, FLAGS.n_jobs)
