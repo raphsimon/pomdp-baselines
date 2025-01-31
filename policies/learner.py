@@ -399,7 +399,7 @@ class Learner:
         self._start_time = time.time()
         self._start_time_last = time.time()
 
-    def train(self, trial):
+    def train(self, trial=None):
         """
         training loop
         """
@@ -461,12 +461,13 @@ class Learner:
                     # save models in later training stage
                     self.save_model(current_num_iters, perf)
 
-                # Report intermediate objective value.
-                trial.report(perf, step=current_num_iters)
+                if trial is not None:
+                    # Report intermediate objective value.
+                    trial.report(perf, step=current_num_iters)
 
-                # Handle pruning based on the intermediate value.
-                if trial.should_prune():
-                    raise optuna.TrialPruned()
+                    # Handle pruning based on the intermediate value.
+                    if trial.should_prune():
+                        raise optuna.TrialPruned()
                 
         self.save_model(current_num_iters, perf)
         # Return the model's final performance
