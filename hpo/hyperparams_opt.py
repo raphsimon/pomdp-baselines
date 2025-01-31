@@ -153,6 +153,7 @@ if __name__ == '__main__':
     flags.DEFINE_string("cfg", None, "path to configuration file")
     flags.DEFINE_string("env", None, "env_name")
     flags.DEFINE_string("algo", None, '["td3", "sac", "sacd"]')
+    flags.DEFINE_string("output", None, "base path for the output")
 
     flags.DEFINE_boolean("automatic_entropy_tuning", None, "for [sac, sacd]")
     flags.DEFINE_float("target_entropy", None, "for [sac, sacd]")
@@ -189,6 +190,11 @@ if __name__ == '__main__':
         v["train"]["num_iters"] = FLAGS.num_iters
     if FLAGS.num_init_rollouts is not None:
         v["train"]["num_init_rollouts_pool"] = FLAGS.num_init_rollouts
+    
+    if FLAGS.output is not None:
+        output_base = FLAGS.output
+    else:
+        output_base = ''
 
     seq_model, algo = v["policy"]["seq_model"], v["policy"]["algo_name"]
     assert seq_model in ["mlp", "lstm", "gru", "lstm-mlp", "gru-mlp"]
@@ -241,10 +247,10 @@ if __name__ == '__main__':
 
             # logs
             if FLAGS.debug:
-                exp_id = "debug/hpo/"
+                exp_id = output_base + "debug/hpo/"
                 logger_formats = ["stdout", "log", "csv"]
             else:
-                exp_id = "logs/hpo/"
+                exp_id = output_base + "logs/hpo/"
                 logger_formats = ["stdout", "log", "csv"]
 
             # Setup the experiment name and logging according to the sampled
