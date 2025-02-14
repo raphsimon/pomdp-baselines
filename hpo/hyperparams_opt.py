@@ -98,7 +98,7 @@ def suggest_sacd_params(trial: optuna.Trial):
     gamma = trial.suggest_categorical("gamma", [0.9, 0.95, 0.975, 0.99])                                    # |V| = 4
     learning_rate = trial.suggest_categorical("learning_rate", [3e-05, 0.0001, 0.0003, 0.001, 0.003])       # |V| = 5
     buffer_size = trial.suggest_categorical("buffer_size", [int(1e4), int(1e5), int(1e6)])                  # |V| = 3
-    batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])                                # |V| = 4
+    batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])                                # |V| = 4
     sampled_seq_len = trial.suggest_categorical("sampled_seq_len", ["all", "batch_size"])                   # |V| = 2
     # This is how I understood things relating to the sampled sequence length
     # But I'm not sure I understand it fully. What does "all" mean? How long
@@ -172,7 +172,6 @@ if __name__ == '__main__':
     flags.DEFINE_integer("n_evals", 10, "Number of evaluations to perform during trial")
     flags.DEFINE_integer("num_iters", None, "Number of iterations to perform in the environment during one trial")
     flags.DEFINE_integer("num_init_rollouts", None, "Number of initial rollouts before training")
-
 
     flags.FLAGS(sys.argv)
 
