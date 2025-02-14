@@ -7,7 +7,7 @@ env:
   env_type: nasim
   env_name: SmallGenPO-v0
   num_eval_tasks: 10
-study_name: sgpo_sacd_gru_1e-1_update
+study_name: sgpo_sacd_gru_1e-1_update_new_sp
 
 train:
 # The total number of steps will be:
