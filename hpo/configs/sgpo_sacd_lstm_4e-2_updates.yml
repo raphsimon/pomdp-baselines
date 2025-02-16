@@ -1,0 +1,54 @@
+# This is a base config for NASim SmallGenPO. It only contains general parameters.
+# All the rest is left to the hyperparameter sampling
+seed: 73
+cuda: 0 # use_gpu
+# RAM: ~5G
+env:
+  env_type: nasim
+  env_name: SmallGenPO-v0
+  num_eval_tasks: 10
+study_name: sgpo_sacd_lstm_4e-2_update_new_sp
+
+train:
+# The total number of steps will be:
+# (number of iterations + rollouts) * env step limit
+  num_iters: 1000 # number meta-training iterates
+  num_init_rollouts_pool: 20 # before training
+  # Note on init rollouts: If the env is more complex it might be a good idea
+  # to collect more initial rollouts
+  num_rollouts_per_iter: 1 # Constant
+  num_updates_per_iter: 4e-2
+
+  # buffer params
+  buffer_size: 1e6 # Constant
+  batch_size: 64 # to tune based on sampled_seq_len
+  sampled_seq_len: -1 # -1 is all, or set = batch_size
+  sample_weight_baseline: 0.0 # Constant
+
+eval:
+  eval_stochastic: true # also eval stochastic policy
+  log_interval: 200 # Number of iterations between logging. I set it to 1/10 of num_iters here
+  save_interval: -1
+  log_tensorboard: false
+
+policy:
+  separate: true
+  seq_model: lstm
+  algo_name: sacd # only support sac-discrete
+
+  action_embedding_size: 32
+  observ_embedding_size: 64
+  reward_embedding_size: 0
+  rnn_hidden_size: 128
+
+  dqn_layers: [128, 128]    # Constant
+  policy_layers: [128, 128] # Constant
+  lr: 0.0003
+  gamma: 0.99
+  tau: 0.005
+
+  sacd:
+    entropy_alpha: null
+    automatic_entropy_tuning: true
+    target_entropy: None # the ratio: target_entropy = ratio * log(|A|)
+    alpha_lr: 0.0003
