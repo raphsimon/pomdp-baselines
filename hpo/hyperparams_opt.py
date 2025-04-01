@@ -95,11 +95,11 @@ def suggest_sacd_params(trial: optuna.Trial):
     :param trial:
     :return: dictionary with all the sampled hyperparameters.
     """
-    gamma = trial.suggest_categorical("gamma", [0.9, 0.95, 0.975, 0.99])                                    # |V| = 4
-    learning_rate = trial.suggest_categorical("learning_rate", [3e-05, 0.0001, 0.0003, 0.001, 0.003])       # |V| = 5
-    buffer_size = trial.suggest_categorical("buffer_size", [int(1e4), int(1e5), int(1e6)])                  # |V| = 3
-    batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])                                # |V| = 4
-    sampled_seq_len = trial.suggest_categorical("sampled_seq_len", ["all", "batch_size"])                   # |V| = 2
+    gamma = trial.suggest_categorical("gamma", [0.95, 0.97, 0.99, 0.995, 0.999])                        # |V| = 5
+    learning_rate = trial.suggest_categorical("learning_rate", [0.00003, 0.0001, 0.0003, 0.001, 0.003]) # |V| = 5
+    buffer_size = trial.suggest_categorical("buffer_size", [int(1e4), int(1e5), int(1e6)])              # |V| = 3
+    batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])                                 # |V| = 3
+    sampled_seq_len = trial.suggest_categorical("sampled_seq_len", ["all", "batch_size"])               # |V| = 2
     # This is how I understood things relating to the sampled sequence length
     # But I'm not sure I understand it fully. What does "all" mean? How long
     # is the sampled sequence length really then?
@@ -110,10 +110,18 @@ def suggest_sacd_params(trial: optuna.Trial):
     # The smaller num_updates_per_iter, the less often the policy is updated
     # Basically, for num_updates_per_iter = 0.004, the policy is updated every
     # 250 iterations.
-    tau = trial.suggest_categorical("tau", [0.001, 0.005, 0.01, 0.02, 0.05])                                # |V| = 5
-    observ_embedding_size = trial.suggest_categorical("observ_embedding_size", [8, 16, 32, 64])             # |V| = 4
-    action_embedding_size = trial.suggest_categorical("action_embedding_size", [8, 16, 32, 64])             # |V| = 4
-    entropy_target = trial.suggest_categorical("entropy_target", [0.9, 0.95, 0.975, 0.99])                  # |V| = 4
+    tau = trial.suggest_categorical("tau", [0.001, 0.005, 0.01, 0.02, 0.05])                            # |V| = 5
+    observ_embedding_size = trial.suggest_categorical("observ_embedding_size", [8, 16, 32, 64])         # |V| = 4
+    action_embedding_size = trial.suggest_categorical("action_embedding_size", [8, 16, 32, 64])         # |V| = 4
+    entropy_target = trial.suggest_categorical("entropy_target", [0.9, 0.95, 0.975, 0.99])              # |V| = 4
+
+    net_arch_type = trial.suggest_categorical("net_arch", ["small", "medium", "large"])                 # |V| = 3
+
+    net_arch = {
+        "small": [64, 64],
+        "medium": [128, 128],
+        "large": [256, 256]
+    }[net_arch_type]
 
     hyperparams = {
         "gamma": gamma,
@@ -125,7 +133,9 @@ def suggest_sacd_params(trial: optuna.Trial):
         "observ_embedding_size": observ_embedding_size,
         "action_embedding_size": action_embedding_size,
         "seq_model": seq_model,
-        "entropy_target": entropy_target
+        "entropy_target": entropy_target,
+        "dqn_layers": net_arch,
+        "policy_layers": net_arch,
     }
     return hyperparams
 
@@ -245,6 +255,8 @@ if __name__ == '__main__':
             v["policy"]["gamma"] = sampled_hyperparams["gamma"]
             v["policy"]["tau"] = sampled_hyperparams["tau"]
             v["policy"]["sacd"]["target_entropy"] = sampled_hyperparams["entropy_target"]
+            v["policy"]["dqn_layers"] = sampled_hyperparams["dqn_layers"]
+            v["policy"]["policy_layers"] = sampled_hyperparams["policy_layers"]
 
             # logs
             if FLAGS.debug:
