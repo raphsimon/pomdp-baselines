@@ -197,7 +197,6 @@ class Learner:
 
         elif self.env_type == "nasim":
             import nasim
-            from nasim.envs.wrappers import StochasticEpisodeStarts
             import gymnasium
             from gymnasium.wrappers import StepAPICompatibility
 
@@ -220,10 +219,15 @@ class Learner:
 
             # Make gymnasium environment compatible with code written for
             # gym environments.
-            env = gymnasium.make(env_name)
-            stochastic_env = StochasticEpisodeStarts(env)
-            self.train_env = StepAPICompatibility(stochastic_env, 
-                                                  output_truncation_bool=False)
+            if env_name == "GenPO-v0":
+                env = gymnasium.make(env_name, 
+                                     min_num_hosts=5,
+                                     max_num_hosts=8,
+                                     exploit_probs=0.9,
+                                     privesc_probs=0.9)
+            else:
+                env = gymnasium.make(env_name)
+            self.train_env = StepAPICompatibility(env, output_truncation_bool=False)
             self.train_env = ResetCompatibilityWrapper(self.train_env)
 
             # NASim does not have a seed method. So we comment this code out
@@ -232,8 +236,18 @@ class Learner:
 
             # Don't use the same stochastic wrapper, we want the test env to be different
             # from the training environment.
-            self.eval_env = StepAPICompatibility(gymnasium.make(env_name), 
-                                                 output_truncation_bool=False)
+
+            if env_name == "GenPO-v0":
+                # TODO: These parameters could be moved into the config actually. As a dict or something
+                # And then unpack them here.
+                eval_env = gymnasium.make(env_name, 
+                                     min_num_hosts=5,
+                                     max_num_hosts=8,
+                                     exploit_probs=0.9,
+                                     privesc_probs=0.9)
+            else:
+                eval_env = gymnasium.make(env_name)
+            self.eval_env = StepAPICompatibility(eval_env, output_truncation_bool=False)
             self.eval_env = ResetCompatibilityWrapper(self.eval_env)
             #self.eval_env.seed(self.seed + 1)
             
