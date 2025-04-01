@@ -5,9 +5,9 @@ cuda: 0 # use_gpu
 # RAM: ~5G
 env:
   env_type: nasim
-  env_name: MediumGenPO-v0
+  env_name: GenPO-v0
   num_eval_tasks: 10
-study_name: mgpo_sacd_gru_4e-3_update_new_sp
+study_name: genpo_sacd_gru_2e-2_update_new_sp
 
 train:
 # The total number of steps will be:
@@ -18,7 +18,7 @@ train:
   # Note on init rollouts: If the env is more complex it might be a good idea
   # to collect more initial rollouts
   num_rollouts_per_iter: 1 # Constant
-  num_updates_per_iter: 4e-3
+  num_updates_per_iter: 2e-2
 
   # buffer params
   buffer_size: 1e6 # Constant

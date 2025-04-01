@@ -5,9 +5,9 @@ cuda: 0 # use_gpu
 # RAM: ~5G
 env:
   env_type: nasim
-  env_name: MediumGenPO-v0
+  env_name: GenPO-v0
   num_eval_tasks: 10
-study_name: mgpo_sacd_gru_1e-2_update_new_sp
+study_name: genpo_sacd_gru_1e-2_update_new_sp
 
 train:
 # The total number of steps will be:
