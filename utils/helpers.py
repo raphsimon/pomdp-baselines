@@ -45,7 +45,7 @@ def env_step(env, action):
     # action: (A)
     # return: all 2D tensor shape (B=1, dim)
     action = ptu.get_numpy(action)
-    if env.action_space.__class__.__name__ in ("Discrete", "FlatActionSpace"):
+    if env.action_space.__class__.__name__ in ("Discrete", "FlatActionSpace", "FlatActionSpacePadded"):
         action = np.argmax(action)  # one-hot to int
     next_obs, reward, done, info = env.step(action)
 
