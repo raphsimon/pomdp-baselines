@@ -196,6 +196,7 @@ class Learner:
             self.max_trajectory_len = self.train_env._max_episode_steps
 
         elif self.env_type == "nasim":
+            print("Got environment name", env_name)
             import nasim
             import gymnasium
             from gymnasium.wrappers import StepAPICompatibility
@@ -209,11 +210,16 @@ class Learner:
                 def __init__(self, env: gym.Env):
                     super().__init__(env)
                     # Add property used un eval loop
-                    self._max_episode_steps = env.unwrapped.scenario.step_limit
+                    self.env = env
+                    self._max_episode_steps = env.scenario.step_limit
 
                 def step(self, action):
-                    obs, r, done, info = self.env.step(action)
-                    return obs, r, done, {}
+                    #print("Passing action to the environment:")
+                    #print(type(action))
+                    #print(action)
+                    #print(len(action))
+                    obs, r, done, trunc, info = self.env.step(action)
+                    return obs, r, trunc, done, {}
 
                 def reset(self, **kwrags):
                     obs, _ = self.env.reset(**kwargs)  # Discard info
@@ -229,8 +235,8 @@ class Learner:
                                      privesc_probs=0.9)
             else:
                 env = gymnasium.make(env_name)
-            self.train_env = StepAPICompatibility(env, output_truncation_bool=False)
-            self.train_env = ResetCompatibilityWrapper(self.train_env)
+            self.train_env = ResetCompatibilityWrapper(env)
+            self.train_env = StepAPICompatibility(self.train_env, output_truncation_bool=False)
 
             # NASim does not have a seed method. So we comment this code out
             #self.train_env.seed(self.seed)
@@ -249,8 +255,8 @@ class Learner:
                                      privesc_probs=0.9)
             else:
                 eval_env = gymnasium.make(env_name)
-            self.eval_env = StepAPICompatibility(eval_env, output_truncation_bool=False)
-            self.eval_env = ResetCompatibilityWrapper(self.eval_env)
+            self.eval_env = ResetCompatibilityWrapper(eval_env)
+            self.eval_env = StepAPICompatibility(self.eval_env, output_truncation_bool=False)
             #self.eval_env.seed(self.seed + 1)
             
             # Reset envs here because we got some error before for not resetting them
@@ -261,7 +267,7 @@ class Learner:
             self.eval_tasks = num_eval_tasks * [None]
 
             self.max_rollouts_per_task = 1
-            self.max_trajectory_len = self.train_env.unwrapped.scenario.step_limit
+            self.max_trajectory_len = 5000
         else:
             raise ValueError
 
@@ -274,7 +280,7 @@ class Learner:
             # NASim uses a FlatActionSpace. Which is just a Discrete action space,
             # but since it is a gymnasium object, we can't use isinstance to compare
             # and have to hard code it.
-            assert self.train_env.action_space.__class__.__name__ in ("Discrete", "FlatActionSpace")
+            assert self.train_env.action_space.__class__.__name__ in ("Discrete", "FlatActionSpace", "FlatActionSpacePadded")
             self.act_dim = self.train_env.action_space.n
             self.act_continuous = False
         self.obs_dim = self.train_env.observation_space.shape[0]  # include 1-dim done
@@ -447,6 +453,7 @@ class Learner:
                 self.log_train_stats(train_stats)
 
         last_eval_num_iters = 0
+        old_num_iters = 0
         while self._n_env_steps_total < self.n_env_steps_total:
             # collect data from num_rollouts_per_iter train tasks:
             env_steps = self.collect_rollouts(num_rollouts=self.num_rollouts_per_iter)
@@ -457,12 +464,15 @@ class Learner:
                 if isinstance(self.num_updates_per_iter, int)
                 else int(math.ceil(self.num_updates_per_iter * env_steps))
             )  # NOTE: ceil to make sure at least 1 step
-            self.log_train_stats(train_stats)
 
             # evaluate and log
             current_num_iters = self._n_env_steps_total // (
                 self.num_rollouts_per_iter * self.max_trajectory_len
             )
+            if old_num_iters < current_num_iters:
+                old_num_iters = current_num_iters
+                print("Current num iters:", current_num_iters)
+                self.log_train_stats(train_stats)
             if (
                 current_num_iters != last_eval_num_iters
                 and current_num_iters % self.log_interval == 0
@@ -499,12 +509,7 @@ class Learner:
         for idx in range(num_rollouts):
             steps = 0
 
-            if self.env_type == "meta" and self.train_env.n_tasks is not None:
-                task = self.train_tasks[np.random.randint(len(self.train_tasks))]
-                obs = ptu.from_numpy(self.train_env.reset(task=task))  # reset task
-            else:
-                obs = ptu.from_numpy(self.train_env.reset())  # reset
-
+            obs = ptu.from_numpy(self.train_env.reset())  # reset
             obs = obs.reshape(1, obs.shape[-1])
             done_rollout = False
 
@@ -547,34 +552,23 @@ class Learner:
                         action, _, _, _ = self.agent.act(obs, deterministic=False)
 
                 # observe reward and next obs (B=1, dim)
+                #print("Actions before squeeze:", action)
+                #print("Shape:", action.shape, "type:", type(action))
                 next_obs, reward, done, info = utl.env_step(
                     self.train_env, action.squeeze(dim=0)
                 )
-                if self.reward_clip and self.env_type == "atari":
-                    reward = torch.tanh(reward)
 
                 done_rollout = False if ptu.get_numpy(done[0][0]) == 0.0 else True
                 # update statistics
                 steps += 1
 
-                ## determine terminal flag per environment
-                if self.env_type == "meta" and "is_goal_state" in dir(
-                    self.train_env.unwrapped
-                ):
-                    # NOTE: following varibad practice: for meta env, even if reaching the goal (term=True),
-                    # the episode still continues.
-                    term = self.train_env.unwrapped.is_goal_state()
-                    self._successes_in_buffer += int(term)
-                elif self.env_type == "credit":  # delayed rewards
-                    term = done_rollout
-                else:
-                    # term ignore time-out scenarios, but record early stopping
-                    term = (
-                        False
-                        if "TimeLimit.truncated" in info
-                        or steps >= self.max_trajectory_len
-                        else done_rollout
-                    )
+                # term ignore time-out scenarios, but record early stopping
+                term = (
+                    False
+                    if "TimeLimit.truncated" in info
+                    or steps >= self.max_trajectory_len
+                    else done_rollout
+                )
 
                 # add data to policy buffer
                 if self.agent_arch == AGENT_ARCHS.Markov:
@@ -592,10 +586,10 @@ class Learner:
                         next_observation=ptu.get_numpy(next_obs.squeeze(dim=0)),
                     )
                 else:  # append tensors to temporary storage
-                    obs_list.append(obs)  # (1, dim)
-                    act_list.append(action)  # (1, dim)
-                    rew_list.append(reward)  # (1, dim)
-                    term_list.append(term)  # bool
+                    obs_list.append(obs)            # (1, dim)
+                    act_list.append(action)         # (1, dim)
+                    rew_list.append(reward)         # (1, dim)
+                    term_list.append(term)          # bool
                     next_obs_list.append(next_obs)  # (1, dim)
 
                 # set: obs <- next_obs
@@ -663,25 +657,15 @@ class Learner:
         success_rate = np.zeros(len(tasks))
         total_steps = np.zeros(len(tasks))
 
-        if self.env_type == "meta":
-            num_steps_per_episode = self.eval_env.unwrapped._max_episode_steps  # H
-            obs_size = self.eval_env.unwrapped.observation_space.shape[
-                0
-            ]  # original size
-            observations = np.zeros((len(tasks), self.max_trajectory_len + 1, obs_size))
-        else:  # pomdp, rmdp, generalize
-            num_steps_per_episode = self.eval_env._max_episode_steps
-            observations = None
+        num_steps_per_episode = self.max_trajectory_len
+        observations = None
+
+        print("Number of eval tasks:", len(tasks))
 
         for task_idx, task in enumerate(tasks):
             step = 0
 
-            if self.env_type == "meta" and self.eval_env.n_tasks is not None:
-                obs = ptu.from_numpy(self.eval_env.reset(task=task))  # reset task
-                observations[task_idx, step, :] = ptu.get_numpy(obs[:obs_size])
-            else:
-                obs = ptu.from_numpy(self.eval_env.reset())  # reset
-
+            obs = ptu.from_numpy(self.eval_env.reset())  # reset
             obs = obs.reshape(1, obs.shape[-1])
 
             if self.agent_arch == AGENT_ARCHS.Memory:
@@ -711,41 +695,14 @@ class Learner:
 
                     # add raw reward
                     running_reward += reward.item()
-                    # clip reward if necessary for policy inputs
-                    if self.reward_clip and self.env_type == "atari":
-                        reward = torch.tanh(reward)
-
                     step += 1
                     done_rollout = False if ptu.get_numpy(done[0][0]) == 0.0 else True
-
-                    if self.env_type == "meta":
-                        observations[task_idx, step, :] = ptu.get_numpy(
-                            next_obs[0, :obs_size]
-                        )
 
                     # set: obs <- next_obs
                     obs = next_obs.clone()
 
-                    # TODO what is going on here? Do we need to care about it?
-                    if (
-                        self.env_type == "meta"
-                        and "is_goal_state" in dir(self.eval_env.unwrapped)
-                        and self.eval_env.unwrapped.is_goal_state()
-                    ):
-                        success_rate[task_idx] = 1.0  # ever once reach
-                    elif (
-                        self.env_type == "generalize"
-                        and self.eval_env.unwrapped.is_success()
-                    ):
-                        success_rate[task_idx] = 1.0  # ever once reach
-                    elif "success" in info and info["success"] == True:  # keytodoor
-                        success_rate[task_idx] = 1.0
-
                     if done_rollout:
                         # for all env types, same
-                        break
-                    if self.env_type == "meta" and info["done_mdp"] == True:
-                        # for early stopping meta episode like Ant-Dir
                         break
 
                 returns_per_episode[task_idx, episode_idx] = running_reward
@@ -772,169 +729,9 @@ class Learner:
         logger.record_tabular("z/rollouts", self._n_rollouts_total)
         logger.record_tabular("z/rl_steps", self._n_rl_update_steps_total)
 
-        # --- evaluation ----
-        if self.env_type == "meta":
-            if self.train_env.n_tasks is not None:
-                (
-                    returns_train,
-                    success_rate_train,
-                    observations,
-                    total_steps_train,
-                ) = self.evaluate(self.train_tasks[: len(self.eval_tasks)])
-            (
-                returns_eval,
-                success_rate_eval,
-                observations_eval,
-                total_steps_eval,
-            ) = self.evaluate(self.eval_tasks)
-            if self.eval_stochastic:
-                (
-                    returns_eval_sto,
-                    success_rate_eval_sto,
-                    observations_eval_sto,
-                    total_steps_eval_sto,
-                ) = self.evaluate(self.eval_tasks, deterministic=False)
-
-            if self.train_env.n_tasks is not None and "plot_behavior" in dir(
-                self.eval_env.unwrapped
-            ):
-                # plot goal-reaching trajs
-                for i, task in enumerate(
-                    self.train_tasks[: min(5, len(self.eval_tasks))]
-                ):
-                    self.eval_env.reset(task=task)  # must have task argument
-                    logger.add_figure(
-                        "trajectory/train_task_{}".format(i),
-                        utl_eval.plot_rollouts(observations[i, :], self.eval_env),
-                    )
-
-                for i, task in enumerate(
-                    self.eval_tasks[: min(5, len(self.eval_tasks))]
-                ):
-                    self.eval_env.reset(task=task)
-                    logger.add_figure(
-                        "trajectory/eval_task_{}".format(i),
-                        utl_eval.plot_rollouts(observations_eval[i, :], self.eval_env),
-                    )
-                    if self.eval_stochastic:
-                        logger.add_figure(
-                            "trajectory/eval_task_{}_sto".format(i),
-                            utl_eval.plot_rollouts(
-                                observations_eval_sto[i, :], self.eval_env
-                            ),
-                        )
-
-            if "is_goal_state" in dir(
-                self.eval_env.unwrapped
-            ):  # goal-reaching success rates
-                # some metrics
-                logger.record_tabular(
-                    "metrics/successes_in_buffer",
-                    self._successes_in_buffer / self._n_env_steps_total,
-                )
-                if self.train_env.n_tasks is not None:
-                    logger.record_tabular(
-                        "metrics/success_rate_train", np.mean(success_rate_train)
-                    )
-                logger.record_tabular(
-                    "metrics/success_rate_eval", np.mean(success_rate_eval)
-                )
-                if self.eval_stochastic:
-                    logger.record_tabular(
-                        "metrics/success_rate_eval_sto", np.mean(success_rate_eval_sto)
-                    )
-
-            for episode_idx in range(self.max_rollouts_per_task):
-                if self.train_env.n_tasks is not None:
-                    logger.record_tabular(
-                        "metrics/return_train_episode_{}".format(episode_idx + 1),
-                        np.mean(returns_train[:, episode_idx]),
-                    )
-                logger.record_tabular(
-                    "metrics/return_eval_episode_{}".format(episode_idx + 1),
-                    np.mean(returns_eval[:, episode_idx]),
-                )
-                if self.eval_stochastic:
-                    logger.record_tabular(
-                        "metrics/return_eval_episode_{}_sto".format(episode_idx + 1),
-                        np.mean(returns_eval_sto[:, episode_idx]),
-                    )
-
-            if self.train_env.n_tasks is not None:
-                logger.record_tabular(
-                    "metrics/total_steps_train", np.mean(total_steps_train)
-                )
-                logger.record_tabular(
-                    "metrics/return_train_total",
-                    np.mean(np.sum(returns_train, axis=-1)),
-                )
-            logger.record_tabular("metrics/total_steps_eval", np.mean(total_steps_eval))
-            logger.record_tabular(
-                "metrics/return_eval_total", np.mean(np.sum(returns_eval, axis=-1))
-            )
-            if self.eval_stochastic:
-                logger.record_tabular(
-                    "metrics/total_steps_eval_sto", np.mean(total_steps_eval_sto)
-                )
-                logger.record_tabular(
-                    "metrics/return_eval_total_sto",
-                    np.mean(np.sum(returns_eval_sto, axis=-1)),
-                )
-
-        elif self.env_type == "generalize":
-            returns_eval, success_rate_eval, total_steps_eval = {}, {}, {}
-            for env, (env_name, eval_num_episodes_per_task) in self.eval_envs.items():
-                self.eval_env = env  # assign eval_env, not train_env
-                for suffix, deterministic in zip(["", "_sto"], [True, False]):
-                    if deterministic == False and self.eval_stochastic == False:
-                        continue
-                    return_eval, success_eval, _, total_step_eval = self.evaluate(
-                        eval_num_episodes_per_task * [None],
-                        deterministic=deterministic,
-                    )
-                    returns_eval[
-                        self.train_env_name + env_name + suffix
-                    ] = return_eval.squeeze(-1)
-                    success_rate_eval[
-                        self.train_env_name + env_name + suffix
-                    ] = success_eval
-                    total_steps_eval[
-                        self.train_env_name + env_name + suffix
-                    ] = total_step_eval
-
-            for k, v in returns_eval.items():
-                logger.record_tabular(f"metrics/return_eval_{k}", np.mean(v))
-            for k, v in success_rate_eval.items():
-                logger.record_tabular(f"metrics/succ_eval_{k}", np.mean(v))
-            for k, v in total_steps_eval.items():
-                logger.record_tabular(f"metrics/total_steps_eval_{k}", np.mean(v))
-
-        elif self.env_type == "rmdp":
-            returns_eval, _, _, total_steps_eval = self.evaluate(self.eval_tasks)
-            returns_eval = returns_eval.squeeze(-1)
-            # np.quantile is introduced in np v1.15, so we have to use np.percentile
-            cutoff = np.percentile(returns_eval, 100 * self.worst_percentile)
-            worst_indices = np.where(
-                returns_eval <= cutoff
-            )  # must be "<=" to avoid empty set
-            returns_eval_worst, total_steps_eval_worst = (
-                returns_eval[worst_indices],
-                total_steps_eval[worst_indices],
-            )
-
-            logger.record_tabular("metrics/return_eval_avg", returns_eval.mean())
-            logger.record_tabular(
-                "metrics/return_eval_worst", returns_eval_worst.mean()
-            )
-            logger.record_tabular(
-                "metrics/total_steps_eval_avg", total_steps_eval.mean()
-            )
-            logger.record_tabular(
-                "metrics/total_steps_eval_worst", total_steps_eval_worst.mean()
-            )
         # Don't know if this is the right place to put NASim
         # Looks like the most straight-forward approach
-        elif self.env_type in ["pomdp", "credit", "atari", "nasim"]:
+        if self.env_type in ["pomdp", "credit", "atari", "nasim"]:
             # Perform deterministic evaluation
             returns_eval, success_rate_eval, _, total_steps_eval = self.evaluate(
                 self.eval_tasks
@@ -982,11 +779,7 @@ class Learner:
 
         logger.dump_tabular()
 
-        if self.env_type == "generalize":
-            return sum([v.mean() for v in success_rate_eval.values()]) / len(
-                success_rate_eval
-            )
-        elif self.eval_stochastic:
+        if self.eval_stochastic:
             return np.mean(np.sum(returns_eval_sto, axis=-1))
         else:
             return np.mean(np.sum(returns_eval, axis=-1))
