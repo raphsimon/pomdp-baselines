@@ -82,12 +82,7 @@ else:
     exp_id = "logs/"
 
 env_type = v["env"]["env_type"]
-if len(v["env"]["env_name"].split("-")) == 3:
-    # pomdp env: name-{F/P/V}-v0
-    env_name, pomdp_type, _ = v["env"]["env_name"].split("-")
-    env_name = env_name + "/" + pomdp_type
-else:
-    env_name = v["env"]["env_name"]
+env_name = v["env"]["env_name"]
 exp_id += f"{env_type}/{env_name}/"
 
 if "oracle" in v["env"] and v["env"]["oracle"] == True:
