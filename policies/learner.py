@@ -208,6 +208,8 @@ class Learner:
                 """
                 def __init__(self, env: gym.Env):
                     super().__init__(env)
+                    # Add property used un eval loop
+                    self._max_episode_steps = env.unwrapped.scenario.step_limit
 
                 def step(self, action):
                     obs, r, done, info = self.env.step(action)
@@ -668,7 +670,7 @@ class Learner:
             ]  # original size
             observations = np.zeros((len(tasks), self.max_trajectory_len + 1, obs_size))
         else:  # pomdp, rmdp, generalize
-            num_steps_per_episode = self.eval_env._max_episode_steps if self.env_type != "nasim" else self.eval_env.unwrapped.scenario.step_limit
+            num_steps_per_episode = self.eval_env._max_episode_steps
             observations = None
 
         for task_idx, task in enumerate(tasks):
