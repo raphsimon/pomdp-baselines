@@ -196,7 +196,6 @@ class Learner:
             self.max_trajectory_len = self.train_env._max_episode_steps
 
         elif self.env_type == "nasim":
-            print("Got environment name", env_name)
             import nasim
             import gymnasium
             from gymnasium.wrappers import StepAPICompatibility
@@ -214,10 +213,6 @@ class Learner:
                     self._max_episode_steps = env.scenario.step_limit
 
                 def step(self, action):
-                    #print("Passing action to the environment:")
-                    #print(type(action))
-                    #print(action)
-                    #print(len(action))
                     obs, r, done, trunc, info = self.env.step(action)
                     return obs, r, trunc, done, {}
 
@@ -253,14 +248,12 @@ class Learner:
 
             # TODO Remove magic number
             self.eval_env_list = [make_nasim_env(env_name) for _ in range(10)]
-            print(len(self.eval_env_list))
             #self.eval_env.seed(self.seed + 1)
             
             # Reset envs here because we got some error before for not resetting them
             for eval_env in self.eval_env_list:
                 eval_env.reset()
             self.train_env.reset()
-            print('Reset all environments')
 
             self.train_tasks = []
             self.eval_tasks = num_eval_tasks * [None]
@@ -551,8 +544,6 @@ class Learner:
                         action, _, _, _ = self.agent.act(obs, deterministic=False)
 
                 # observe reward and next obs (B=1, dim)
-                #print("Actions before squeeze:", action)
-                #print("Shape:", action.shape, "type:", type(action))
                 next_obs, reward, done, info = utl.env_step(
                     self.train_env, action.squeeze(dim=0)
                 )
@@ -611,9 +602,9 @@ class Learner:
                         torch.cat(next_obs_list, dim=0)
                     ),  # (L, dim)
                 )
-                print(
-                    f"steps: {steps} term: {term} ret: {torch.cat(rew_list, dim=0).sum().item():.2f}"
-                )
+                #print(
+                #    f"steps: {steps} term: {term} ret: {torch.cat(rew_list, dim=0).sum().item():.2f}"
+                #)
             self._n_env_steps_total += steps
             self._n_rollouts_total += 1
         return self._n_env_steps_total - before_env_steps
@@ -655,16 +646,11 @@ class Learner:
         num_episodes = self.max_rollouts_per_task  # k
         # max_trajectory_len = k*H
         returns_per_episode = np.zeros((len(tasks), num_episodes))
-        print("returns_per_episode.shape:", returns_per_episode.shape)
         success_rate = np.zeros((len(tasks), num_episodes))
-        print("success_rate.shape:", success_rate.shape)
         total_steps = np.zeros((len(tasks), num_episodes))
-        print("total_steps.shape:", total_steps.shape)
 
         num_steps_per_episode = self.max_trajectory_len
         observations = None
-
-        print("Number of eval tasks:", len(tasks))
 
         for task_idx, task in enumerate(tasks):
             # TODO Here we should use another eval environment
@@ -717,10 +703,6 @@ class Learner:
                 
                 returns_per_episode[task_idx, episode_idx] = running_reward
                 total_steps[task_idx, episode_idx] = step
-        print("Deterministic:", deterministic)
-        print("Returns per episode:\n", returns_per_episode)
-        print("Total steps:\n", total_steps)
-        print("Success Rate:\n", success_rate)
         return returns_per_episode, success_rate, observations, total_steps
 
     def log_train_stats(self, train_stats):
