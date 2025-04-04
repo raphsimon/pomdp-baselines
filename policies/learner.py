@@ -224,19 +224,25 @@ class Learner:
                 def reset(self, **kwrags):
                     obs, _ = self.env.reset(**kwargs)  # Discard info
                     return obs
+            
+            # Write a function to easily create the environments we need. Also because we
+            # can use that in a list comprehension.
+            def make_nasim_env(env_name):
+                if env_name == "GenPO-v0":
+                    env = gymnasium.make(env_name, 
+                                        min_num_hosts=5,
+                                        max_num_hosts=8,
+                                        exploit_probs=0.9,
+                                        privesc_probs=0.9)
+                else:
+                    env = gymnasium.make(env_name)
+                env = ResetCompatibilityWrapper(env)
+                env = StepAPICompatibility(env, output_truncation_bool=False)
+                return env
 
             # Make gymnasium environment compatible with code written for
             # gym environments.
-            if env_name == "GenPO-v0":
-                env = gymnasium.make(env_name, 
-                                     min_num_hosts=5,
-                                     max_num_hosts=8,
-                                     exploit_probs=0.9,
-                                     privesc_probs=0.9)
-            else:
-                env = gymnasium.make(env_name)
-            self.train_env = ResetCompatibilityWrapper(env)
-            self.train_env = StepAPICompatibility(self.train_env, output_truncation_bool=False)
+            self.train_env = make_nasim_env(env_name)
 
             # NASim does not have a seed method. So we comment this code out
             #self.train_env.seed(self.seed)
@@ -245,28 +251,21 @@ class Learner:
             # Don't use the same stochastic wrapper, we want the test env to be different
             # from the training environment.
 
-            if env_name == "GenPO-v0":
-                # TODO: These parameters could be moved into the config actually. As a dict or something
-                # And then unpack them here.
-                eval_env = gymnasium.make(env_name, 
-                                     min_num_hosts=5,
-                                     max_num_hosts=8,
-                                     exploit_probs=0.9,
-                                     privesc_probs=0.9)
-            else:
-                eval_env = gymnasium.make(env_name)
-            self.eval_env = ResetCompatibilityWrapper(eval_env)
-            self.eval_env = StepAPICompatibility(self.eval_env, output_truncation_bool=False)
+            # TODO Remove magic number
+            self.eval_env_list = [make_nasim_env(env_name) for _ in range(10)]
+            print(len(self.eval_env_list))
             #self.eval_env.seed(self.seed + 1)
             
             # Reset envs here because we got some error before for not resetting them
-            self.eval_env.reset()
+            for eval_env in self.eval_env_list:
+                eval_env.reset()
             self.train_env.reset()
+            print('Reset all environments')
 
             self.train_tasks = []
             self.eval_tasks = num_eval_tasks * [None]
 
-            self.max_rollouts_per_task = 1
+            self.max_rollouts_per_task = 10
             self.max_trajectory_len = 5000
         else:
             raise ValueError
@@ -651,11 +650,16 @@ class Learner:
     @torch.no_grad()
     def evaluate(self, tasks, deterministic=True):
 
+        print("In evaluate function")
+
         num_episodes = self.max_rollouts_per_task  # k
         # max_trajectory_len = k*H
         returns_per_episode = np.zeros((len(tasks), num_episodes))
-        success_rate = np.zeros(len(tasks))
-        total_steps = np.zeros(len(tasks))
+        print("returns_per_episode.shape:", returns_per_episode.shape)
+        success_rate = np.zeros((len(tasks), num_episodes))
+        print("success_rate.shape:", success_rate.shape)
+        total_steps = np.zeros((len(tasks), num_episodes))
+        print("total_steps.shape:", total_steps.shape)
 
         num_steps_per_episode = self.max_trajectory_len
         observations = None
@@ -663,16 +667,19 @@ class Learner:
         print("Number of eval tasks:", len(tasks))
 
         for task_idx, task in enumerate(tasks):
-            step = 0
-
-            obs = ptu.from_numpy(self.eval_env.reset())  # reset
-            obs = obs.reshape(1, obs.shape[-1])
-
-            if self.agent_arch == AGENT_ARCHS.Memory:
-                # assume initial reward = 0.0
-                action, reward, internal_state = self.agent.get_initial_info()
-
+            # TODO Here we should use another eval environment
+            eval_env = self.eval_env_list[task_idx]
             for episode_idx in range(num_episodes):
+
+                step = 0
+
+                obs = ptu.from_numpy(eval_env.reset())  # reset
+                obs = obs.reshape(1, obs.shape[-1])
+
+                if self.agent_arch == AGENT_ARCHS.Memory:
+                    # assume initial reward = 0.0
+                    action, reward, internal_state = self.agent.get_initial_info()
+                    
                 running_reward = 0.0
                 for _ in range(num_steps_per_episode):
                     if self.agent_arch == AGENT_ARCHS.Memory:
@@ -690,7 +697,7 @@ class Learner:
 
                     # observe reward and next obs
                     next_obs, reward, done, info = utl.env_step(
-                        self.eval_env, action.squeeze(dim=0)
+                        eval_env, action.squeeze(dim=0)
                     )
 
                     # add raw reward
@@ -701,12 +708,19 @@ class Learner:
                     # set: obs <- next_obs
                     obs = next_obs.clone()
 
+                    if (self.env_type == "nasim") and eval_env.unwrapped.goal_reached():
+                        success_rate[task_idx, episode_idx] = 1.0
+
                     if done_rollout:
                         # for all env types, same
                         break
-
+                
                 returns_per_episode[task_idx, episode_idx] = running_reward
-            total_steps[task_idx] = step
+                total_steps[task_idx, episode_idx] = step
+        print("Deterministic:", deterministic)
+        print("Returns per episode:\n", returns_per_episode)
+        print("Total steps:\n", total_steps)
+        print("Success Rate:\n", success_rate)
         return returns_per_episode, success_rate, observations, total_steps
 
     def log_train_stats(self, train_stats):
@@ -732,37 +746,31 @@ class Learner:
         # Don't know if this is the right place to put NASim
         # Looks like the most straight-forward approach
         if self.env_type in ["pomdp", "credit", "atari", "nasim"]:
-            # Perform deterministic evaluation
-            returns_eval, success_rate_eval, _, total_steps_eval = self.evaluate(
-                self.eval_tasks
-            )
             # Perform stochastic evaluation, if set in the config.
             if self.eval_stochastic:
-                (
-                    returns_eval_sto,
-                    success_rate_eval_sto,
-                    _,
-                    total_steps_eval_sto,
-                ) = self.evaluate(self.eval_tasks, deterministic=False)
+                returns_eval_sto, success_rate_eval_sto, _, total_steps_eval_sto = self.evaluate(
+                    self.eval_tasks, deterministic=False)
 
-            logger.record_tabular("metrics/total_steps_eval", np.mean(total_steps_eval))
-            logger.record_tabular(
-                "metrics/return_eval_total", np.mean(np.sum(returns_eval, axis=-1))
-            )
-            logger.record_tabular(
-                "metrics/success_rate_eval", np.mean(success_rate_eval)
-            )
-
-            if self.eval_stochastic:
                 logger.record_tabular(
                     "metrics/total_steps_eval_sto", np.mean(total_steps_eval_sto)
                 )
                 logger.record_tabular(
-                    "metrics/return_eval_total_sto",
-                    np.mean(np.sum(returns_eval_sto, axis=-1)),
+                    "metrics/return_eval_total_sto", np.mean(returns_eval_sto)
                 )
                 logger.record_tabular(
                     "metrics/success_rate_eval_sto", np.mean(success_rate_eval_sto)
+                )
+            else:
+                # Perform deterministic evaluation
+                returns_eval, success_rate_eval, _, total_steps_eval = self.evaluate(
+                    self.eval_tasks
+                )
+                logger.record_tabular("metrics/total_steps_eval", np.mean(total_steps_eval))
+                logger.record_tabular(
+                    "metrics/return_eval_total", np.mean(returns_eval)
+                )
+                logger.record_tabular(
+                    "metrics/success_rate_eval", np.mean(success_rate_eval)
                 )
 
         else:
