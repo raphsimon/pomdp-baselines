@@ -449,7 +449,7 @@ class Learner:
         while self._n_env_steps_total < self.n_env_steps_total:
             # collect data from num_rollouts_per_iter train tasks:
             env_steps = self.collect_rollouts(num_rollouts=self.num_rollouts_per_iter)
-            logger.log("env steps", self._n_env_steps_total)
+            #logger.log("env steps", self._n_env_steps_total)
 
             train_stats = self.update(
                 self.num_updates_per_iter
@@ -464,6 +464,7 @@ class Learner:
             if old_num_iters < current_num_iters:
                 old_num_iters = current_num_iters
                 print("Current num iters:", current_num_iters)
+                print("Current global steps:", self._n_env_steps_total)
                 self.log_train_stats(train_stats)
             if (
                 current_num_iters != last_eval_num_iters
@@ -640,9 +641,6 @@ class Learner:
 
     @torch.no_grad()
     def evaluate(self, tasks, deterministic=True):
-
-        print("In evaluate function")
-
         num_episodes = self.max_rollouts_per_task  # k
         # max_trajectory_len = k*H
         returns_per_episode = np.zeros((len(tasks), num_episodes))
