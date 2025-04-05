@@ -32,7 +32,8 @@ and also used to prune other trials.
 
 DATABASE_URL = os.environ.get("OPTUNA_DB_URL", "sqlite:////home/rsimon/optuna_hpo.db")
 
-def optimize_hyperparameters(study_name, optimize_trial, n_trials=20, max_total_trials=None, n_jobs=1):
+def optimize_hyperparameters(study_name, optimize_trial, n_trials, max_total_trials, n_jobs, 
+                             pruner_warmup_steps, pruner_startup_trials):
     # Add stream handler of stdout to show the messages
     #optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
 
@@ -59,7 +60,8 @@ def optimize_hyperparameters(study_name, optimize_trial, n_trials=20, max_total_
         storage=storage,
         load_if_exists=True,
         direction='maximize',
-        pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=400)
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=pruner_startup_trials, 
+                                           n_warmup_steps=pruner_warmup_steps)
     ) # No sampler is specified, so a default sampler (TPE) is used.
     
     if max_total_trials is not None:
@@ -182,6 +184,8 @@ if __name__ == '__main__':
     flags.DEFINE_integer("n_evals", 10, "Number of evaluations to perform during trial")
     flags.DEFINE_integer("num_iters", None, "Number of iterations to perform in the environment during one trial")
     flags.DEFINE_integer("num_init_rollouts", None, "Number of initial rollouts before training")
+    flags.DEFINE_integer("pruner_startup_trials", 10, "Number of trials to be done before starting to prune")
+    flags.DEFINE_integer("pruner_warmup_steps", 300, "Number of steps/iterations to be performed in the trial before pruning")
 
     flags.FLAGS(sys.argv)
 
@@ -225,7 +229,7 @@ if __name__ == '__main__':
     env_name = v["env"]["env_name"]
     study_name = v["study_name"]
 
-    def hyperparams_search(n_trials=50, max_total_trials=None, n_jobs=1):
+    def hyperparams_search(n_trials, n_jobs, pruner_startup_trials, pruner_warmup_steps, max_total_trials=None):
 
         # system: device, threads, seed, pid
         seed = np.random.randint(0, 1e9)
@@ -310,6 +314,6 @@ if __name__ == '__main__':
 
             return score
 
-        optimize_hyperparameters(study_name, optimize_trial, n_trials, max_total_trials, n_jobs)
+        optimize_hyperparameters(study_name, optimize_trial, n_trials, max_total_trials, n_jobs, pruner_warmup_steps, pruner_startup_trials)
 
-    hyperparams_search(FLAGS.trials, FLAGS.max_total_trials, FLAGS.n_jobs)
+    hyperparams_search(FLAGS.trials, FLAGS.n_jobs, FLAGS.pruner_warmup_trials, FLAGS.pruner_warmup_steps, FLAGS.max_total_trials,)
