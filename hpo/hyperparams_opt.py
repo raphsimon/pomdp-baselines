@@ -163,7 +163,7 @@ if __name__ == '__main__':
     # Setting up the arguments to parse
     FLAGS = flags.FLAGS
     flags.DEFINE_string("cfg", None, "path to configuration file")
-    flags.DEFINE_string("env", None, "env_name")
+    flags.DEFINE_string("env", None, "env_name")    
     flags.DEFINE_string("algo", None, '["td3", "sac", "sacd"]')
     flags.DEFINE_string("output", None, "base path for the output")
 
@@ -316,4 +316,4 @@ if __name__ == '__main__':
 
         optimize_hyperparameters(study_name, optimize_trial, n_trials, max_total_trials, n_jobs, pruner_warmup_steps, pruner_startup_trials)
 
-    hyperparams_search(FLAGS.trials, FLAGS.n_jobs, FLAGS.pruner_warmup_trials, FLAGS.pruner_warmup_steps, FLAGS.max_total_trials,)
+    hyperparams_search(FLAGS.trials, FLAGS.n_jobs, FLAGS.pruner_startup_trials, FLAGS.pruner_warmup_steps, FLAGS.max_total_trials)
